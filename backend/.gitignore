@@ -1,0 +1,10 @@
+venv/
+__pycache__/
+*.pyc
+.env
+civicpulse.db
+uploads/complaints/*
+uploads/resolutions/*
+!uploads/complaints/.gitkeep
+!uploads/resolutions/.gitkeep
+
