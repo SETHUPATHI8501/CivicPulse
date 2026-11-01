@@ -1,9 +1,10 @@
 # CivicPulse AI — Smart Civic Complaint, Public Safety & Emergency Response Platform
 
-**Team:** Alronclad  
-**Institution:** KSR Institute of Engineering and Technology (KSRIET)  
+**Team:** Alronclad   
 **Hackathon Track:** ARSW001 — Smart Community & Municipal Governance  
 **Core Product Vision:** *"Speak in Tamil. Pin the issue. AI triages it. Duplicates merge. Officers prove the fix."*
+
+<img width="720" height="1600" alt="WhatsApp Image 2026-11-01 at 4 53 34 AM" src="https://github.com/user-attachments/assets/4e08d1f4-ba75-48f9-a055-1a8f1c8404fe" />
 
 ---
 
@@ -91,7 +92,6 @@ npx expo start
 
 | Role | Email | Password | Department |
 | :--- | :--- | :--- | :--- |
-| **Admin (`ADMIN`)** | `admin@civicpulse.gov` | `AdminPassword2026!` | Municipal Administration |
 | **Officer (`OFFICER`)** | `anitha.roads@civicpulse.gov` | `AnithaSecurePass2026!` | Roads / Public Works |
 | **Officer (`OFFICER`)** | `karthik.sanitation@civicpulse.gov` | `KarthikSecurePass2026!` | Sanitation |
 | **Officer (`OFFICER`)** | `meena.water@civicpulse.gov` | `MeenaSecurePass2026!` | Water Supply |
