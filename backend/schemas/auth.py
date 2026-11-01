@@ -5,8 +5,8 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 
 class LoginRequest(BaseModel):
-    """Schema for officer and admin login."""
-    email: str = Field(..., description="Registered officer email address")
+    """Schema for officer, worker, and admin login."""
+    email: str = Field(..., description="Registered email address")
     password: str = Field(..., description="Account password")
 
     @field_validator("email")
@@ -25,15 +25,17 @@ class TokenResponse(BaseModel):
     role: str
     department: str
     name: str
+    officer_id: Optional[int] = None
+    email: Optional[str] = None
 
 
 class OfficerCreate(BaseModel):
-    """Schema for administrative creation of a new officer account."""
-    name: str = Field(..., min_length=2, description="Officer full name")
-    email: str = Field(..., description="Officer official email address")
+    """Schema for administrative creation of a new officer, worker, or admin account."""
+    name: str = Field(..., min_length=2, description="Full name")
+    email: str = Field(..., description="Official email address")
     password: str = Field(..., min_length=6, description="Password (at least 6 characters)")
     department: str = Field(..., min_length=2, description="Assigned municipal department")
-    role: str = Field(default="OFFICER", description="Role: 'OFFICER' or 'ADMIN'")
+    role: str = Field(default="OFFICER", description="Role: 'OFFICER', 'WORKER', or 'ADMIN'")
 
     @field_validator("email")
     @classmethod
@@ -47,13 +49,13 @@ class OfficerCreate(BaseModel):
     @classmethod
     def validate_role(cls, v: str) -> str:
         role_upper = v.strip().upper()
-        if role_upper not in {"OFFICER", "ADMIN"}:
-            raise ValueError("Role must be either 'OFFICER' or 'ADMIN'.")
+        if role_upper not in {"OFFICER", "ADMIN", "WORKER"}:
+            raise ValueError("Role must be 'OFFICER', 'WORKER', or 'ADMIN'.")
         return role_upper
 
 
 class OfficerResponse(BaseModel):
-    """Schema for returning officer public profile (never includes hashed password)."""
+    """Schema for returning officer/worker public profile (never includes hashed password)."""
     id: int
     name: str
     email: str
@@ -66,7 +68,7 @@ class OfficerResponse(BaseModel):
 
 
 class OfficerListResponse(BaseModel):
-    """Schema for returning a list of officers."""
+    """Schema for returning a list of officers/workers."""
     total: int
     items: List[OfficerResponse]
 
@@ -77,6 +79,12 @@ class ComplaintAssignRequest(BaseModel):
     """Schema for admin complaint assignment request."""
     officer_id: int = Field(..., description="ID of the municipal officer to assign")
     note: Optional[str] = Field(default=None, description="Optional assignment notes or remarks")
+
+
+class WorkerAssignRequest(BaseModel):
+    """Schema for assigning a field worker to a complaint."""
+    worker_id: int = Field(..., description="ID of the field worker to assign")
+    note: Optional[str] = Field(default=None, description="Optional field instructions for the worker")
 
 
 class ComplaintStatusUpdateRequest(BaseModel):
@@ -103,4 +111,3 @@ class ComplaintStatusUpdateRequest(BaseModel):
         if st not in valid:
             raise ValueError(f"Status must be one of {valid}")
         return st
-

@@ -9,15 +9,12 @@ import {
   AlertCircle,
   ArrowRight,
   Sparkles,
-  CheckCircle,
-  Building2,
   KeyRound,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
 import { loginOfficer, getOfficerProfile } from '../services/officerService';
 import Button from '../components/Button';
-import Input from '../components/Input';
 import LanguageSelector from '../components/LanguageSelector';
 
 export default function OfficerLogin() {
@@ -66,8 +63,12 @@ export default function OfficerLogin() {
       // 3. Save into AuthContext
       login(authToken, profile);
 
-      // 4. Redirect to intended destination
-      navigate(from, { replace: true });
+      // 4. Redirect to intended destination (or worker portal if WORKER)
+      if (profile?.role === 'WORKER') {
+        navigate('/officer/worker', { replace: true });
+      } else {
+        navigate(from, { replace: true });
+      }
     } catch (err) {
       localStorage.removeItem('civicpulse_auth_token');
       localStorage.removeItem('civicpulse_auth_user');
@@ -121,7 +122,7 @@ export default function OfficerLogin() {
             CivicPulse <span className="text-teal-400">AI</span>
           </h1>
           <p className="mt-2 text-sm text-slate-400 font-medium">
-            {t('officerLoginDesc', 'Authorized Municipal Grievance Redressal Portal')}
+            {t('officerLoginDesc', 'Authorized Municipal Grievance & Emergency Portal')}
           </p>
         </div>
 
@@ -215,14 +216,14 @@ export default function OfficerLogin() {
               <Sparkles className="w-3.5 h-3.5 text-teal-400" />
               <span>Development Quick-Login</span>
             </div>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-xs">
               <button
                 type="button"
                 onClick={() => handleQuickFill('admin@civicpulse.gov', 'AdminPassword2026!')}
                 className="text-left p-2.5 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-700/60 hover:border-teal-500/50 transition-all group"
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-white group-hover:text-teal-400">Admin Account</span>
+                  <span className="font-bold text-white group-hover:text-teal-400">Admin</span>
                   <span className="text-[10px] bg-purple-500/20 text-purple-300 px-1.5 py-0.5 rounded font-mono">
                     ADMIN
                   </span>
@@ -238,13 +239,29 @@ export default function OfficerLogin() {
                 className="text-left p-2.5 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-700/60 hover:border-teal-500/50 transition-all group"
               >
                 <div className="flex items-center justify-between">
-                  <span className="font-bold text-white group-hover:text-teal-400">Officer (Roads)</span>
+                  <span className="font-bold text-white group-hover:text-teal-400">Officer</span>
                   <span className="text-[10px] bg-teal-500/20 text-teal-300 px-1.5 py-0.5 rounded font-mono">
                     OFFICER
                   </span>
                 </div>
                 <p className="text-[11px] text-slate-400 mt-0.5 font-mono truncate">
                   anitha.roads@civicpulse.gov
+                </p>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleQuickFill('raju.worker@civicpulse.gov', 'RajuWorkerPass2026!')}
+                className="text-left p-2.5 rounded-xl bg-slate-900/60 hover:bg-slate-900 border border-slate-700/60 hover:border-amber-500/50 transition-all group"
+              >
+                <div className="flex items-center justify-between">
+                  <span className="font-bold text-white group-hover:text-amber-400">Worker</span>
+                  <span className="text-[10px] bg-amber-500/20 text-amber-300 px-1.5 py-0.5 rounded font-mono">
+                    WORKER
+                  </span>
+                </div>
+                <p className="text-[11px] text-slate-400 mt-0.5 font-mono truncate">
+                  raju.worker@civicpulse.gov
                 </p>
               </button>
             </div>
@@ -259,4 +276,3 @@ export default function OfficerLogin() {
     </div>
   );
 }
-

@@ -9,13 +9,16 @@ import Spinner from './components/Spinner';
 const Home = lazy(() => import('./pages/Home'));
 const ReportComplaint = lazy(() => import('./pages/ReportComplaint'));
 const TrackComplaint = lazy(() => import('./pages/TrackComplaint'));
+const CitizenCivicHub = lazy(() => import('./pages/CitizenCivicHub'));
 const NotFound = lazy(() => import('./pages/NotFound'));
 
-// Officer & Admin Pages
+// Officer, Worker & Admin Pages
 const OfficerLogin = lazy(() => import('./pages/OfficerLogin'));
 const OfficerDashboard = lazy(() => import('./pages/OfficerDashboard'));
 const ComplaintDetails = lazy(() => import('./pages/ComplaintDetails'));
+const HeatmapAnalytics = lazy(() => import('./pages/HeatmapAnalytics'));
 const AdminOfficers = lazy(() => import('./pages/AdminOfficers'));
+const WorkerPortal = lazy(() => import('./pages/WorkerPortal'));
 
 function PageLoader() {
   return (
@@ -40,17 +43,45 @@ export default function App() {
               <Route path="/report" element={<ReportComplaint />} />
               <Route path="/track" element={<TrackComplaint />} />
               <Route path="/track/:trackingId" element={<TrackComplaint />} />
+              <Route path="/gis" element={<CitizenCivicHub defaultTab="gis" />} />
+              <Route path="/assistant" element={<CitizenCivicHub defaultTab="assistant" />} />
+              <Route path="/sos" element={<CitizenCivicHub defaultTab="sos" />} />
+              <Route path="/analytics" element={<Navigate to="/gis" replace />} />
 
               {/* Officer & Admin Authentication */}
               <Route path="/officer/login" element={<OfficerLogin />} />
               <Route path="/officer" element={<Navigate to="/officer/dashboard" replace />} />
 
-              {/* Protected Officer Routes */}
+              {/* Protected Officer & Worker Routes */}
               <Route
                 path="/officer/dashboard"
                 element={
                   <ProtectedRoute>
                     <OfficerDashboard />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/officer/worker"
+                element={
+                  <ProtectedRoute>
+                    <WorkerPortal defaultMode="worker" />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/officer/emergency"
+                element={
+                  <ProtectedRoute>
+                    <WorkerPortal defaultMode="sos" />
+                  </ProtectedRoute>
+                }
+              />
+              <Route
+                path="/officer/analytics"
+                element={
+                  <ProtectedRoute>
+                    <HeatmapAnalytics />
                   </ProtectedRoute>
                 }
               />

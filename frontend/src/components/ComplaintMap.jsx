@@ -1,9 +1,9 @@
-import React, { useEffect, useMemo } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, useMap } from 'react-leaflet';
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { Link } from 'react-router-dom';
-import { MapPin, ExternalLink, Layers, CheckCircle2, Clock } from 'lucide-react';
+import { ExternalLink, Layers, Globe } from 'lucide-react';
 import StatusBadge from './StatusBadge';
 import PriorityBadge from './PriorityBadge';
 import { formatDate } from '../utils/formatDate';
@@ -75,7 +75,10 @@ export default function ComplaintMap({
   onSelectComplaint,
   height = '500px',
   className = '',
+  defaultLayer = 'satellite',
 }) {
+  const [mapStyle, setMapStyle] = useState(defaultLayer); // 'satellite' | 'street'
+
   // Filter valid complaints with coordinates
   const mappedComplaints = useMemo(() => {
     return complaints.filter(
@@ -92,7 +95,7 @@ export default function ComplaintMap({
 
   return (
     <div
-      className={`relative w-full rounded-2xl overflow-hidden border border-slate-200/90 shadow-card bg-slate-100 ${className}`}
+      className={`relative w-full rounded-2xl overflow-hidden border border-slate-200/90 shadow-card bg-slate-900 ${className}`}
       style={{ height }}
     >
       <MapContainer
@@ -101,10 +104,19 @@ export default function ComplaintMap({
         scrollWheelZoom={true}
         className="w-full h-full z-0"
       >
-        <TileLayer
-          attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
-          url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
-        />
+        {mapStyle === 'satellite' ? (
+          <TileLayer
+            key="satellite"
+            attribution="Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, UPR-EGP, and the GIS User Community"
+            url="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+          />
+        ) : (
+          <TileLayer
+            key="street"
+            attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a> contributors'
+            url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
+          />
+        )}
 
         <FitBounds complaints={mappedComplaints} />
 
@@ -125,10 +137,10 @@ export default function ComplaintMap({
             >
               <Popup className="civic-popup" minWidth={260} maxWidth={320}>
                 <div className="p-1 space-y-2.5">
-                  {/* Top Bar: Tracking ID & Badges */}
+                  {/* Top Bar: Case ID & Badges */}
                   <div className="flex items-center justify-between gap-1 border-b border-slate-100 pb-2">
                     <span className="font-mono text-xs font-bold text-navy-950 bg-navy-50 px-2 py-0.5 rounded border border-navy-100">
-                      {c.tracking_id || `CP-${c.id}`}
+                      {c.case_id || c.tracking_id || `CP-${c.id}`}
                     </span>
                     <div className="flex items-center gap-1">
                       <PriorityBadge priority={c.priority} size="sm" />
@@ -180,6 +192,33 @@ export default function ComplaintMap({
         })}
       </MapContainer>
 
+      {/* Top-Right Satellite / Street Layer Switcher */}
+      <div className="absolute top-3 right-3 z-[1000] bg-white/95 backdrop-blur-sm border border-slate-200 rounded-xl p-1 shadow-md flex items-center gap-1">
+        <button
+          type="button"
+          onClick={() => setMapStyle('satellite')}
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            mapStyle === 'satellite'
+              ? 'bg-navy-900 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <Globe className="w-3.5 h-3.5" />
+          <span>Satellite</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => setMapStyle('street')}
+          className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-bold transition-all ${
+            mapStyle === 'street'
+              ? 'bg-navy-900 text-white shadow-xs'
+              : 'text-slate-600 hover:bg-slate-100'
+          }`}
+        >
+          <span>Street Map</span>
+        </button>
+      </div>
+
       {/* Map Legend Overlay */}
       <div className="absolute bottom-3 left-3 z-[1000] bg-white/95 backdrop-blur-sm border border-slate-200 rounded-xl p-2.5 shadow-md flex items-center gap-3 text-xs">
         <span className="font-bold text-slate-700 text-[11px] uppercase tracking-wider">Status:</span>
@@ -203,4 +242,3 @@ export default function ComplaintMap({
     </div>
   );
 }
-

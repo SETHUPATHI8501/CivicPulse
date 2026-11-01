@@ -2,10 +2,10 @@ import uuid
 from pathlib import Path
 from typing import List, Optional, Tuple
 from fastapi import HTTPException, status
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session, selectinload
 
-from models import Complaint, ComplaintLog, Officer
+from models import CivicNotification, Complaint, ComplaintLog, Officer
 from schemas.auth import OfficerCreate
 from services.auth_service import hash_password
 
@@ -83,7 +83,7 @@ def assign_complaint(
     2. Validates officer is active.
     3. Verifies officer's department matches complaint's department.
     4. Updates assigned_officer_id.
-    5. Appends an ASSIGNED audit log entry.
+    5. Appends an ASSIGNED audit log entry and creates notifications including the Case ID.
     """
     complaint = db.execute(
         select(Complaint)
@@ -110,7 +110,6 @@ def assign_complaint(
             detail=f"Cannot assign complaint to inactive officer '{officer.name}'.",
         )
 
-    # Department compatibility check (ADMIN officers or exact department match allowed)
     if officer.role.upper() != "ADMIN" and officer.department != complaint.department:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -121,17 +120,39 @@ def assign_complaint(
         )
 
     complaint.assigned_officer_id = officer.id
+    case_id = complaint.case_id or complaint.tracking_id
 
-    # Append assignment audit log
     assignment_log = ComplaintLog(
         complaint_id=complaint.id,
         actor_name=assigned_by_name,
         actor_role="ADMIN",
         action="ASSIGNED",
-        note=note or f"Complaint assigned to officer {officer.name} ({officer.department}).",
+        note=note or f"Complaint {case_id} assigned to officer {officer.name} ({officer.department}).",
     )
     try:
         db.add(assignment_log)
+        try:
+            cit_notif = CivicNotification(
+                recipient_role="CITIZEN",
+                tracking_id=case_id,
+                event_type="OFFICER_ASSIGNED",
+                title=f"Officer Assigned: {case_id}",
+                message=f"Your complaint {case_id} has been assigned to an officer ({officer.name}, {officer.department}).",
+                is_read=False,
+            )
+            off_notif = CivicNotification(
+                recipient_role="OFFICER",
+                recipient_id=officer.id,
+                tracking_id=case_id,
+                event_type="OFFICER_ASSIGNED",
+                title=f"New Case Assigned: {case_id}",
+                message=f"Complaint {case_id} ({complaint.category}) has been assigned to you by {assigned_by_name}.",
+                is_read=False,
+            )
+            db.add(cit_notif)
+            db.add(off_notif)
+        except Exception:
+            pass
         db.commit()
         db.refresh(complaint)
         return complaint
@@ -147,17 +168,17 @@ def get_officer_complaints(
     limit: int = 20,
     status: Optional[str] = None,
     category: Optional[str] = None,
+    case_id: Optional[str] = None,
 ) -> Tuple[int, List[Complaint]]:
     """
     Retrieve complaints queue for officers:
     - ADMIN can view all complaints.
     - Regular OFFICER can view only complaints assigned to them.
-    Supports status/category filtering and pagination.
+    Supports status, category, and Case ID filtering and pagination.
     """
     query = select(Complaint).options(selectinload(Complaint.logs))
     count_query = select(func.count(Complaint.id))
 
-    # Role-based visibility
     if current_officer.role.upper() != "ADMIN":
         query = query.where(Complaint.assigned_officer_id == current_officer.id)
         count_query = count_query.where(Complaint.assigned_officer_id == current_officer.id)
@@ -169,6 +190,15 @@ def get_officer_complaints(
     if category:
         query = query.where(Complaint.category == category)
         count_query = count_query.where(Complaint.category == category)
+
+    if case_id and case_id.strip():
+        q_clean = f"%{case_id.strip().upper()}%"
+        cond = or_(
+            func.upper(Complaint.case_id).like(q_clean),
+            func.upper(Complaint.tracking_id).like(q_clean),
+        )
+        query = query.where(cond)
+        count_query = count_query.where(cond)
 
     total = db.execute(count_query).scalar_one()
     items = (
@@ -212,7 +242,6 @@ def update_complaint_status(
             detail=f"Complaint with ID {complaint_id} not found.",
         )
 
-    # Permission check: assigned officer or ADMIN
     if current_officer.role.upper() != "ADMIN" and complaint.assigned_officer_id != current_officer.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
@@ -222,14 +251,12 @@ def update_complaint_status(
     old_status = complaint.status.upper()
     target_status = new_status.upper()
 
-    # The status endpoint must not allow setting status to RESOLVED
     if target_status == "RESOLVED":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Direct transition to RESOLVED is prohibited via status endpoint. Use the dedicated /resolve endpoint with resolution photo and note.",
         )
 
-    # Validate transition
     allowed = ALLOWED_TRANSITIONS.get(old_status, set())
     if target_status not in allowed:
         raise HTTPException(
@@ -241,13 +268,13 @@ def update_complaint_status(
         )
 
     complaint.status = target_status
+    case_id = complaint.case_id or complaint.tracking_id
 
     if resolution_note:
         complaint.resolution_note = resolution_note
     if resolution_photo_url:
         complaint.resolution_photo_url = resolution_photo_url
 
-    # Append audit log
     status_log = ComplaintLog(
         complaint_id=complaint.id,
         actor_name=current_officer.name,
@@ -256,11 +283,23 @@ def update_complaint_status(
         old_status=old_status,
         new_status=target_status,
         officer_id=current_officer.id,
-        note=note or f"Status changed from {old_status} to {target_status}.",
+        note=note or f"Complaint {case_id} status changed from {old_status} to {target_status}.",
     )
 
     try:
         db.add(status_log)
+        try:
+            cit_notif = CivicNotification(
+                recipient_role="CITIZEN",
+                tracking_id=case_id,
+                event_type="STATUS_CHANGED",
+                title=f"Status Update: {case_id}",
+                message=f"Your complaint {case_id} status has been updated to {target_status} by {current_officer.name}.",
+                is_read=False,
+            )
+            db.add(cit_notif)
+        except Exception:
+            pass
         db.commit()
         db.refresh(complaint)
         return complaint
@@ -271,13 +310,7 @@ def update_complaint_status(
 
 def validate_image_bytes(content: bytes, filename: str, content_type: Optional[str] = None) -> str:
     """
-    Validate that uploaded file is a valid image within 5 MB:
-    - Rejects empty bytes
-    - Rejects bytes > 5 MB
-    - Rejects invalid extensions
-    - Rejects invalid MIME types
-    - Validates magic header bytes for JPEG, PNG, WEBP
-    Returns the normalized extension (e.g. '.jpg', '.png', '.webp')
+    Validate that uploaded file is a valid image within 5 MB.
     """
     if not content or len(content) == 0:
         raise HTTPException(
@@ -306,7 +339,6 @@ def validate_image_bytes(content: bytes, filename: str, content_type: Optional[s
                 detail=f"Invalid Content-Type '{content_type}'. Supported image MIME types: {sorted(list(ALLOWED_IMAGE_MIMES))}.",
             )
 
-    # Magic signature check
     is_jpeg = content.startswith(b"\xff\xd8\xff")
     is_png = content.startswith(b"\x89PNG\r\n\x1a\n")
     is_webp = content.startswith(b"RIFF") and len(content) >= 12 and content[8:12] == b"WEBP"
@@ -330,21 +362,7 @@ def resolve_complaint(
     content_type: Optional[str] = None,
 ) -> Complaint:
     """
-    Dedicated complaint resolution workflow:
-    1. Authenticates officer and verifies complaint exists.
-    2. Verifies officer is assigned to complaint (unless ADMIN).
-    3. Verifies current complaint status is IN_PROGRESS.
-    4. Validates non-empty resolution note.
-    5. Validates image file type, magic header bytes, and <= 5 MB size limit.
-    6. Generates safe unique filename and saves to uploads/resolutions.
-    7. Sets status = RESOLVED, saves photo URL and resolution note.
-    8. Records audit log entry in ComplaintLog:
-       - action: RESOLVED
-       - old_status: IN_PROGRESS
-       - new_status: RESOLVED
-       - officer_id: officer.id
-       - note: resolution_note
-    9. Transactional rollback and file deletion on database commit failure.
+    Dedicated complaint resolution workflow with mandatory photo proof and Case ID notification.
     """
     complaint = db.execute(
         select(Complaint)
@@ -358,21 +376,18 @@ def resolve_complaint(
             detail=f"Complaint with ID {complaint_id} not found.",
         )
 
-    # 1. Permission check: assigned officer or ADMIN
     if current_officer.role.upper() != "ADMIN" and complaint.assigned_officer_id != current_officer.id:
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="You are not authorized to resolve complaints not assigned to you.",
         )
 
-    # 2. Allow resolution only from IN_PROGRESS status
     if complaint.status.upper() != "IN_PROGRESS":
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=f"Cannot resolve complaint with status '{complaint.status}'. Complaint status must be IN_PROGRESS.",
         )
 
-    # 3. Require a non-empty resolution note
     trimmed_note = resolution_note.strip() if resolution_note else ""
     if not trimmed_note:
         raise HTTPException(
@@ -380,18 +395,16 @@ def resolve_complaint(
             detail="Resolution note cannot be empty or solely whitespace.",
         )
 
-    # 4. Require valid image and reject > 5 MB
     ext = validate_image_bytes(file_bytes, filename=filename, content_type=content_type)
 
-    # 5. Generate safe unique filename
     unique_filename = f"res_{complaint_id}_{uuid.uuid4().hex[:12]}{ext}"
     resolutions_dir = Path(__file__).resolve().parent.parent / "uploads" / "resolutions"
     resolutions_dir.mkdir(parents=True, exist_ok=True)
     file_path = resolutions_dir / unique_filename
 
     old_status = complaint.status.upper()
+    case_id = complaint.case_id or complaint.tracking_id
 
-    # 6. Database transaction with guaranteed file cleanup on failure
     try:
         file_path.write_bytes(file_bytes)
 
@@ -411,6 +424,18 @@ def resolve_complaint(
         )
 
         db.add(resolution_log)
+        try:
+            cit_notif = CivicNotification(
+                recipient_role="CITIZEN",
+                tracking_id=case_id,
+                event_type="COMPLAINT_RESOLVED",
+                title=f"Complaint Resolved: {case_id}",
+                message=f"Your complaint {case_id} has been resolved by {current_officer.name}. Note: {trimmed_note}",
+                is_read=False,
+            )
+            db.add(cit_notif)
+        except Exception:
+            pass
         db.commit()
         db.refresh(complaint)
         return complaint
@@ -422,4 +447,3 @@ def resolve_complaint(
             except OSError:
                 pass
         raise exc
-

@@ -160,9 +160,12 @@ def classify_complaint(
         )
 
         try:
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
+            executor = concurrent.futures.ThreadPoolExecutor(max_workers=1)
+            try:
                 future = executor.submit(_call_gemini_api, client, model_name, prompt)
                 raw_text = future.result(timeout=CLASSIFICATION_TIMEOUT_SECONDS)
+            finally:
+                executor.shutdown(wait=False, cancel_futures=True)
 
             validated_result = validate_ai_response(raw_text)
             if validated_result is not None:
@@ -176,4 +179,3 @@ def classify_complaint(
 
     # Automatic fallback to rule-based Tamil & English classifier
     return classify_fallback(citizen_text=citizen_text, voice_transcript=voice_transcript)
-

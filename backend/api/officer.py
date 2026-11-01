@@ -12,7 +12,7 @@ from schemas.auth import (
     OfficerResponse,
 )
 from schemas.complaint import ComplaintListResponse, ComplaintResponse
-from services import officer_service
+from services import advanced_service, officer_service
 from services.auth_service import require_admin, require_officer_or_admin
 
 router = APIRouter(tags=["Officers & Operations"])
@@ -34,7 +34,7 @@ def create_officer_account(
     db: Session = Depends(get_db),
 ):
     """
-    Administrative endpoint to register a new municipal officer or admin.
+    Administrative endpoint to register a new municipal officer, field worker, or admin.
     Requires ADMIN JWT token.
     """
     return officer_service.create_officer(db=db, officer_in=officer_in)
@@ -88,7 +88,7 @@ def get_officer_details(
     response_model=ComplaintResponse,
     summary="Assign complaint to department officer (ADMIN only)",
 )
-def assign_complaint_to_officer(
+async def assign_complaint_to_officer(
     complaint_id: int = Path(..., ge=1, description="Complaint ID to assign"),
     assignment_in: ComplaintAssignRequest = ...,
     current_admin: Officer = Depends(require_admin),
@@ -96,15 +96,26 @@ def assign_complaint_to_officer(
 ):
     """
     Assign an active complaint to an officer whose department matches the complaint.
-    Requires ADMIN JWT. Appends ASSIGNED audit log entry.
+    Requires ADMIN JWT. Appends ASSIGNED audit log entry and broadcasts live update.
     """
-    return officer_service.assign_complaint(
+    comp = officer_service.assign_complaint(
         db=db,
         complaint_id=complaint_id,
         officer_id=assignment_in.officer_id,
         assigned_by_name=current_admin.name,
         note=assignment_in.note,
     )
+    await advanced_service.broadcaster.broadcast(
+        {
+            "event": "OFFICER_ASSIGNED",
+            "id": comp.id,
+            "case_id": comp.case_id or comp.tracking_id,
+            "tracking_id": comp.tracking_id,
+            "assigned_officer_id": comp.assigned_officer_id,
+            "status": comp.status,
+        }
+    )
+    return comp
 
 
 @router.get(
@@ -117,6 +128,7 @@ def get_officer_complaints_queue(
     limit: int = Query(20, ge=1, le=100),
     status: Optional[str] = Query(None, description="Filter by status (e.g. OPEN, IN_PROGRESS)"),
     category: Optional[str] = Query(None, description="Filter by category"),
+    case_id: Optional[str] = Query(None, description="Search by Case ID (e.g. CP-2026-00093)"),
     current_officer: Officer = Depends(require_officer_or_admin),
     db: Session = Depends(get_db),
 ):
@@ -132,6 +144,7 @@ def get_officer_complaints_queue(
         limit=limit,
         status=status,
         category=category,
+        case_id=case_id,
     )
     return ComplaintListResponse(
         total=total,
@@ -146,20 +159,16 @@ def get_officer_complaints_queue(
     response_model=ComplaintResponse,
     summary="Update complaint status (Assigned Officer or ADMIN)",
 )
-def update_complaint_status_transition(
+async def update_complaint_status_transition(
     complaint_id: int = Path(..., ge=1, description="ID of complaint to update"),
     status_in: ComplaintStatusUpdateRequest = ...,
     current_officer: Officer = Depends(require_officer_or_admin),
     db: Session = Depends(get_db),
 ):
     """
-    Transition complaint status following state machine rules:
-    - OPEN -> IN_PROGRESS, NEEDS_INFO, REJECTED
-    - IN_PROGRESS -> RESOLVED, NEEDS_INFO
-    - NEEDS_INFO -> OPEN, IN_PROGRESS, REJECTED
-    Appends audit log entry with officer name and remarks.
+    Transition complaint status following state machine rules and broadcast live update.
     """
-    return officer_service.update_complaint_status(
+    comp = officer_service.update_complaint_status(
         db=db,
         complaint_id=complaint_id,
         new_status=status_in.status,
@@ -168,6 +177,16 @@ def update_complaint_status_transition(
         resolution_note=status_in.resolution_note,
         resolution_photo_url=status_in.resolution_photo_url,
     )
+    await advanced_service.broadcaster.broadcast(
+        {
+            "event": "COMPLAINT_STATUS_UPDATED",
+            "id": comp.id,
+            "case_id": comp.case_id or comp.tracking_id,
+            "tracking_id": comp.tracking_id,
+            "status": comp.status,
+        }
+    )
+    return comp
 
 
 @router.patch(
@@ -183,16 +202,10 @@ async def resolve_complaint_endpoint(
     db: Session = Depends(get_db),
 ):
     """
-    Dedicated resolution endpoint for municipal officers and administrators:
-    - Requires authenticated officer assigned to the complaint (or ADMIN role).
-    - Requires current status to be IN_PROGRESS.
-    - Validates image file format (JPEG, PNG, WEBP) and size (<= 5 MB).
-    - Saves photo into uploads/resolutions with safe unique name.
-    - Sets complaint status to RESOLVED and records audit log in ComplaintLog.
-    - Guarantees transactional rollback and file cleanup on failure.
+    Dedicated resolution endpoint for municipal officers and administrators.
     """
     file_bytes = await resolution_photo.read()
-    return officer_service.resolve_complaint(
+    comp = officer_service.resolve_complaint(
         db=db,
         complaint_id=complaint_id,
         current_officer=current_officer,
@@ -201,4 +214,14 @@ async def resolve_complaint_endpoint(
         filename=resolution_photo.filename or "resolution.jpg",
         content_type=resolution_photo.content_type,
     )
-
+    await advanced_service.broadcaster.broadcast(
+        {
+            "event": "COMPLAINT_RESOLVED",
+            "id": comp.id,
+            "case_id": comp.case_id or comp.tracking_id,
+            "tracking_id": comp.tracking_id,
+            "status": comp.status,
+            "resolution_photo_url": comp.resolution_photo_url,
+        }
+    )
+    return comp

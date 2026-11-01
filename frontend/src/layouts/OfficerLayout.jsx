@@ -8,9 +8,9 @@ import {
   ExternalLink,
   Menu,
   X,
-  UserCheck,
-  Building2,
-  ChevronDown,
+  Flame,
+  Wrench,
+  Siren,
 } from 'lucide-react';
 import { useAuth } from '../context/AuthContext';
 import { useLanguage } from '../context/LanguageContext';
@@ -72,6 +72,23 @@ export default function OfficerLayout({ children }) {
                 <NavLink to="/officer/dashboard" className={navLinkClass}>
                   <Layers className="w-4 h-4" />
                   <span>{t('assignedComplaints', 'Complaints Queue')}</span>
+                </NavLink>
+
+                <NavLink to="/officer/worker" className={navLinkClass}>
+                  <Wrench className="w-4 h-4" />
+                  <span>{t('workerPortal', 'Field Worker')}</span>
+                </NavLink>
+
+                {officer?.role !== 'WORKER' && (
+                  <NavLink to="/officer/emergency" className={navLinkClass}>
+                    <Siren className="w-4 h-4 text-rose-500" />
+                    <span>{t('emergencyCommand', 'SOS Command')}</span>
+                  </NavLink>
+                )}
+
+                <NavLink to="/officer/analytics" className={navLinkClass}>
+                  <Flame className="w-4 h-4" />
+                  <span>{t('hotspotAnalytics', 'Hotspot Analytics')}</span>
                 </NavLink>
 
                 {isAdmin && (
@@ -189,6 +206,35 @@ export default function OfficerLayout({ children }) {
                 <span>{t('assignedComplaints', 'Complaints Queue')}</span>
               </NavLink>
 
+              <NavLink
+                to="/officer/worker"
+                onClick={() => setMobileMenuOpen(false)}
+                className={mobileNavLinkClass}
+              >
+                <Wrench className="w-5 h-5 text-amber-600" />
+                <span>{t('workerPortal', 'Field Worker Portal')}</span>
+              </NavLink>
+
+              {officer?.role !== 'WORKER' && (
+                <NavLink
+                  to="/officer/emergency"
+                  onClick={() => setMobileMenuOpen(false)}
+                  className={mobileNavLinkClass}
+                >
+                  <Siren className="w-5 h-5 text-rose-600" />
+                  <span>{t('emergencyCommand', 'SOS Emergency Command')}</span>
+                </NavLink>
+              )}
+
+              <NavLink
+                to="/officer/analytics"
+                onClick={() => setMobileMenuOpen(false)}
+                className={mobileNavLinkClass}
+              >
+                <Flame className="w-5 h-5 text-teal-600" />
+                <span>{t('hotspotAnalytics', 'Hotspot Analytics')}</span>
+              </NavLink>
+
               {isAdmin && (
                 <NavLink
                   to="/officer/admin/officers"
@@ -245,4 +291,3 @@ export default function OfficerLayout({ children }) {
     </div>
   );
 }
-

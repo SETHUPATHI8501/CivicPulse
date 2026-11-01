@@ -37,6 +37,7 @@ password_hasher = PasswordHash((Argon2Hasher(),))
 
 # OAuth2 scheme pointing to token endpoint
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token")
+optional_oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/v1/auth/token", auto_error=False)
 
 
 def hash_password(password: str) -> str:
@@ -90,7 +91,7 @@ def authenticate_officer(
     password: str,
 ) -> Optional[Officer]:
     """
-    Verify officer email and password against stored database hash.
+    Verify officer/worker/admin email and password against stored database hash.
     Returns Officer if authenticated and active, else None.
     """
     normalized_email = email.strip().lower()
@@ -112,7 +113,7 @@ def get_current_officer(
     db: Session = Depends(get_db),
 ) -> Officer:
     """
-    FastAPI dependency to retrieve the currently authenticated Officer.
+    FastAPI dependency to retrieve the currently authenticated Officer/Worker/Admin.
     Verifies JWT token and ensures account is active.
     """
     payload = decode_access_token(token)
@@ -124,10 +125,29 @@ def get_current_officer(
     if not officer or not officer.is_active:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Authenticated officer not found or account is disabled.",
+            detail="Authenticated account not found or is disabled.",
             headers={"WWW-Authenticate": "Bearer"},
         )
     return officer
+
+
+def get_optional_officer(
+    token: Optional[str] = Depends(optional_oauth2_scheme),
+    db: Session = Depends(get_db),
+) -> Optional[Officer]:
+    """Optional auth dependency for endpoints that adapt to Citizen vs Officer/Admin."""
+    if not token:
+        return None
+    try:
+        payload = decode_access_token(token)
+        email: str = payload.get("sub")
+        stmt = select(Officer).where(Officer.email == email)
+        officer = db.execute(stmt).scalar_one_or_none()
+        if officer and officer.is_active:
+            return officer
+    except Exception:
+        return None
+    return None
 
 
 def require_admin(
@@ -157,3 +177,16 @@ def require_officer_or_admin(
         )
     return current_officer
 
+
+def require_worker_or_officer_or_admin(
+    current_officer: Officer = Depends(get_current_officer),
+) -> Officer:
+    """
+    FastAPI dependency allowing WORKER, OFFICER, or ADMIN roles.
+    """
+    if current_officer.role.upper() not in {"WORKER", "OFFICER", "ADMIN"}:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Authorized municipal worker, officer, or administrator credentials required.",
+        )
+    return current_officer

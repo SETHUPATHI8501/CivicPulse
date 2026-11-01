@@ -32,8 +32,10 @@ import {
   assignComplaint,
   listOfficers,
 } from '../services/officerService';
+import { connectLiveUpdates } from '../services/advancedService';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
+import CaseIdBadge from '../components/CaseIdBadge';
 import AuditTimeline from '../components/AuditTimeline';
 import DuplicateAlert from '../components/DuplicateAlert';
 import ComplaintMap from '../components/ComplaintMap';
@@ -90,22 +92,42 @@ export default function ComplaintDetails() {
     setTimeout(() => setToastMessage(null), 4000);
   };
 
-  const loadComplaint = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  const loadComplaint = useCallback(async (silent = false) => {
+    if (!silent) {
+      setIsLoading(true);
+      setError(null);
+    }
     try {
       const data = await getComplaintDetails(id);
       setComplaint(data);
     } catch (err) {
-      setError(err.userMessage || 'Complaint record not found or inaccessible.');
+      if (!silent) {
+        setError(err.userMessage || 'Complaint record not found or inaccessible.');
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }, [id]);
 
   useEffect(() => {
     loadComplaint();
   }, [loadComplaint]);
+
+  useEffect(() => {
+    const disconnect = connectLiveUpdates((evt) => {
+      if (
+        complaint &&
+        (evt.case_id === complaint.case_id ||
+          evt.tracking_id === complaint.tracking_id ||
+          String(evt.complaint_id) === String(complaint.id))
+      ) {
+        loadComplaint(true);
+      }
+    });
+    return disconnect;
+  }, [complaint, loadComplaint]);
 
   // Status transitions
   const getAllowedTransitions = (status) => {
@@ -253,7 +275,7 @@ export default function ComplaintDetails() {
     return (
       <OfficerLayout>
         <div className="max-w-2xl mx-auto">
-          <ErrorState message={error || 'Complaint not found'} onRetry={loadComplaint} />
+          <ErrorState message={error || 'Complaint not found'} onRetry={() => loadComplaint(false)} />
           <div className="mt-4 text-center">
             <Link to="/officer/dashboard" className="text-sm font-bold text-teal-600 hover:underline">
               ← Return to Complaints Queue
@@ -347,25 +369,22 @@ export default function ComplaintDetails() {
         {/* Left 2 Columns: Main Details */}
         <div className="lg:col-span-2 space-y-6">
           {/* Header Card */}
-          <div className="bg-white rounded-2xl border border-slate-200/90 p-6 sm:p-8 shadow-2xs">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 border-b border-slate-100 pb-5 mb-5">
-              <div>
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-wider block mb-1">
-                  Citizen Grievance Record
-                </span>
-                <h1 className="text-2xl sm:text-3xl font-extrabold text-navy-950 font-mono tracking-tight">
-                  {complaint.tracking_id}
-                </h1>
-              </div>
-              <div className="flex items-center gap-2 flex-wrap">
-                <PriorityBadge priority={complaint.priority} size="md" />
-                <StatusBadge status={complaint.status} size="md" />
-              </div>
-            </div>
+          <div className="bg-white rounded-2xl border border-slate-200/90 p-6 sm:p-8 shadow-2xs space-y-6">
+            <CaseIdBadge
+              variant="banner"
+              caseId={complaint.case_id || complaint.tracking_id}
+              trackingId={complaint.tracking_id}
+              status={complaint.status}
+              priority={complaint.priority}
+              createdAt={complaint.created_at}
+              showCopy={true}
+              showShare={true}
+              showTrackLink={true}
+            />
 
             {/* AI Duplicate Alert */}
             {complaint.duplicate_group_id && (
-              <div className="mb-6">
+              <div>
                 <DuplicateAlert
                   duplicateGroupId={complaint.duplicate_group_id}
                   confidence={complaint.duplicate_confidence}
@@ -526,6 +545,18 @@ export default function ComplaintDetails() {
             </h3>
 
             <div className="space-y-3 text-xs">
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <span className="text-slate-500">Unified Case ID</span>
+                <span className="font-mono font-extrabold text-teal-700">
+                  {complaint.case_id || complaint.tracking_id}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between pb-2 border-b border-slate-100">
+                <span className="text-slate-500">Tracking Ref</span>
+                <span className="font-mono font-bold text-slate-700">{complaint.tracking_id}</span>
+              </div>
+
               <div className="flex items-center justify-between pb-2 border-b border-slate-100">
                 <span className="text-slate-500">Database ID</span>
                 <span className="font-mono font-bold text-slate-800">{complaint.id}</span>
@@ -869,4 +900,3 @@ export default function ComplaintDetails() {
     </OfficerLayout>
   );
 }
-

@@ -36,8 +36,10 @@ import {
   listOfficers,
   assignComplaint,
 } from '../services/officerService';
+import { connectLiveUpdates } from '../services/advancedService';
 import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
+import CaseIdBadge from '../components/CaseIdBadge';
 import Button from '../components/Button';
 import Spinner from '../components/Spinner';
 import EmptyState from '../components/EmptyState';
@@ -91,9 +93,11 @@ export default function OfficerDashboard() {
   };
 
   // Fetch Complaints Queue
-  const fetchComplaints = useCallback(async () => {
-    setIsLoading(true);
-    setError(null);
+  const fetchComplaints = useCallback(async (silent = false) => {
+    if (!silent) {
+      setIsLoading(true);
+      setError(null);
+    }
     try {
       const params = { limit: 100 };
       if (statusFilter !== 'ALL') {
@@ -103,9 +107,13 @@ export default function OfficerDashboard() {
       setComplaints(data.items || []);
       setTotalCount(data.total || 0);
     } catch (err) {
-      setError(err.userMessage || 'Failed to load complaints queue. Please try again.');
+      if (!silent) {
+        setError(err.userMessage || 'Failed to load complaints queue. Please try again.');
+      }
     } finally {
-      setIsLoading(false);
+      if (!silent) {
+        setIsLoading(false);
+      }
     }
   }, [statusFilter]);
 
@@ -113,21 +121,43 @@ export default function OfficerDashboard() {
     fetchComplaints();
   }, [fetchComplaints]);
 
-  // Client-side filtering for priority and search query
+  // Real-time WebSocket synchronization + 20s polling fallback
+  useEffect(() => {
+    const disconnect = connectLiveUpdates((evt) => {
+      fetchComplaints(true);
+      if (evt.event === 'COMPLAINT_CREATED' && (evt.case_id || evt.tracking_id)) {
+        showToast(`New grievance synced live: ${evt.case_id || evt.tracking_id} (${evt.category || 'Civic'})`);
+      }
+    });
+    const pollTimer = setInterval(() => fetchComplaints(true), 20000);
+    return () => {
+      disconnect();
+      clearInterval(pollTimer);
+    };
+  }, [fetchComplaints]);
+
+  // Client-side filtering for priority and search query (supports Case ID CP-2026-XXXXX & legacy tracking ID)
   const filteredComplaints = useMemo(() => {
     return complaints.filter((c) => {
       // Priority filter
       if (priorityFilter !== 'ALL' && c.priority !== priorityFilter) {
         return false;
       }
-      // Search query (tracking ID, citizen text, category, department)
+      // Search query (case ID, tracking ID, citizen text, category, department)
       if (searchQuery.trim()) {
         const q = searchQuery.toLowerCase().trim();
+        const caseId = (c.case_id || '').toLowerCase();
         const tracking = (c.tracking_id || '').toLowerCase();
         const text = (c.citizen_text || '').toLowerCase();
         const cat = (c.category || '').toLowerCase();
         const dept = (c.department || '').toLowerCase();
-        if (!tracking.includes(q) && !text.includes(q) && !cat.includes(q) && !dept.includes(q)) {
+        if (
+          !caseId.includes(q) &&
+          !tracking.includes(q) &&
+          !text.includes(q) &&
+          !cat.includes(q) &&
+          !dept.includes(q)
+        ) {
           return false;
         }
       }
@@ -194,7 +224,8 @@ export default function OfficerDashboard() {
         status: statusForm.targetStatus,
         note: statusForm.note.trim() || undefined,
       });
-      showToast(`Complaint ${statusModalComplaint.tracking_id} updated to ${statusForm.targetStatus}`);
+      const cid = statusModalComplaint.case_id || statusModalComplaint.tracking_id;
+      showToast(`Case ${cid} updated to ${statusForm.targetStatus}`);
       setStatusModalComplaint(null);
       fetchComplaints();
     } catch (err) {
@@ -256,7 +287,8 @@ export default function OfficerDashboard() {
     setResolveError('');
     try {
       await resolveComplaint(resolveModalComplaint.id, resolvePhoto, resolveNote);
-      showToast(`Complaint ${resolveModalComplaint.tracking_id} successfully marked as RESOLVED!`);
+      const cid = resolveModalComplaint.case_id || resolveModalComplaint.tracking_id;
+      showToast(`Case ${cid} successfully marked as RESOLVED!`);
       setResolveModalComplaint(null);
       fetchComplaints();
     } catch (err) {
@@ -308,7 +340,8 @@ export default function OfficerDashboard() {
     setAssignError('');
     try {
       await assignComplaint(assignModalComplaint.id, selectedOfficerId, assignNote);
-      showToast(`Complaint ${assignModalComplaint.tracking_id} successfully assigned to officer.`);
+      const cid = assignModalComplaint.case_id || assignModalComplaint.tracking_id;
+      showToast(`Case ${cid} successfully assigned to officer.`);
       setAssignModalComplaint(null);
       fetchComplaints();
     } catch (err) {
@@ -399,7 +432,7 @@ export default function OfficerDashboard() {
             size="sm"
             icon={RefreshCw}
             isLoading={isLoading}
-            onClick={fetchComplaints}
+            onClick={() => fetchComplaints(false)}
             title="Refresh queue"
           >
             {t('refresh', 'Refresh')}
@@ -482,7 +515,7 @@ export default function OfficerDashboard() {
               type="text"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              placeholder="Search by Tracking ID, issue description, category..."
+              placeholder="Search by Case ID (CP-2026-00093), Tracking ID, issue description, category..."
               className="w-full pl-10 pr-4 py-2 bg-slate-50 border border-slate-200 rounded-xl text-sm placeholder-slate-400 focus:outline-none focus:ring-2 focus:ring-teal-500 focus:bg-white transition-all"
             />
             {searchQuery && (
@@ -537,7 +570,7 @@ export default function OfficerDashboard() {
           <p className="text-sm font-semibold text-slate-600">Loading complaints queue...</p>
         </div>
       ) : error ? (
-        <ErrorState message={error} onRetry={fetchComplaints} />
+        <ErrorState message={error} onRetry={() => fetchComplaints(false)} />
       ) : filteredComplaints.length === 0 ? (
         <EmptyState
           title={t('emptyTitle', 'No complaints found')}
@@ -571,9 +604,11 @@ export default function OfficerDashboard() {
             >
               <div>
                 <div className="flex items-center justify-between gap-2 mb-3">
-                  <span className="font-mono text-xs font-extrabold text-navy-950 bg-navy-50 px-2 py-0.5 rounded border border-navy-100">
-                    {c.tracking_id}
-                  </span>
+                  <CaseIdBadge
+                    caseId={c.case_id || c.tracking_id}
+                    trackingId={c.tracking_id}
+                    showCopy={true}
+                  />
                   <div className="flex items-center gap-1.5">
                     <PriorityBadge priority={c.priority} size="sm" />
                     <StatusBadge status={c.status} size="sm" />
@@ -663,7 +698,7 @@ export default function OfficerDashboard() {
               <thead className="bg-slate-50/80 border-b border-slate-200 text-xs font-bold text-slate-500 uppercase tracking-wider">
                 <tr>
                   <th scope="col" className="px-5 py-3.5">
-                    Tracking ID
+                    Case ID
                   </th>
                   <th scope="col" className="px-5 py-3.5">
                     Category & Department
@@ -689,12 +724,14 @@ export default function OfficerDashboard() {
                 {filteredComplaints.map((c) => (
                   <tr key={c.id} className="hover:bg-slate-50/80 transition-colors">
                     <td className="px-5 py-4 whitespace-nowrap">
-                      <div className="flex flex-col">
-                        <span className="font-mono text-xs font-extrabold text-navy-950">
-                          {c.tracking_id}
-                        </span>
+                      <div className="flex flex-col gap-1">
+                        <CaseIdBadge
+                          caseId={c.case_id || c.tracking_id}
+                          trackingId={c.tracking_id}
+                          showCopy={true}
+                        />
                         {c.duplicate_group_id && (
-                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded mt-1 border border-amber-200/80 max-w-fit">
+                          <span className="inline-flex items-center gap-1 text-[10px] font-bold text-amber-700 bg-amber-50 px-1.5 py-0.2 rounded border border-amber-200/80 max-w-fit">
                             <Layers className="w-2.5 h-2.5" />
                             Group {c.duplicate_group_id.slice(0, 8)}
                           </span>
@@ -791,7 +828,7 @@ export default function OfficerDashboard() {
               <div>
                 <h3 className="text-lg font-bold text-navy-950">Update Complaint Status</h3>
                 <p className="text-xs text-slate-500 font-mono mt-0.5">
-                  Tracking ID: {statusModalComplaint.tracking_id}
+                  Case ID: {statusModalComplaint.case_id || statusModalComplaint.tracking_id}
                 </p>
               </div>
               <button
@@ -902,7 +939,7 @@ export default function OfficerDashboard() {
                   <span>Resolve Complaint</span>
                 </h3>
                 <p className="text-xs text-slate-500 font-mono mt-0.5">
-                  Tracking ID: {resolveModalComplaint.tracking_id}
+                  Case ID: {resolveModalComplaint.case_id || resolveModalComplaint.tracking_id}
                 </p>
               </div>
               <button
@@ -1031,7 +1068,7 @@ export default function OfficerDashboard() {
                   <span>Assign Complaint to Officer</span>
                 </h3>
                 <p className="text-xs text-slate-500 font-mono mt-0.5">
-                  Tracking ID: {assignModalComplaint.tracking_id} • Dept: {assignModalComplaint.department}
+                  Case ID: {assignModalComplaint.case_id || assignModalComplaint.tracking_id} • Dept: {assignModalComplaint.department}
                 </p>
               </div>
               <button
@@ -1128,4 +1165,3 @@ export default function OfficerDashboard() {
     </OfficerLayout>
   );
 }
-

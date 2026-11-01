@@ -87,3 +87,20 @@ export async function getAllComplaints(params = {}) {
   return response.data; // ComplaintListResponse
 }
 
+/**
+ * Hotspot & Spatial Analytics Functions
+ */
+export async function getAnalyticsSummary(params = {}) {
+  const response = await api.get('/analytics/summary', { params });
+  return response.data;
+}
+
+export async function getHotspots(params = {}) {
+  const response = await api.get('/analytics/hotspots', { params });
+  return response.data;
+}
+
+export async function getComplaintDensity(params = {}) {
+  const response = await api.get('/analytics/complaint-density', { params });
+  return response.data;
+}

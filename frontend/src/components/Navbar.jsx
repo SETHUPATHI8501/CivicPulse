@@ -7,8 +7,10 @@ import {
   PlusCircle,
   Search,
   ShieldCheck,
-  BarChart3,
   Home,
+  Satellite,
+  Bot,
+  Siren,
 } from 'lucide-react';
 import { useLanguage } from '../context/LanguageContext';
 import LanguageSelector from './LanguageSelector';
@@ -23,7 +25,9 @@ export default function Navbar() {
     { to: '/', labelKey: 'home', defaultLabel: 'Home', icon: Home },
     { to: '/report', labelKey: 'reportComplaint', defaultLabel: 'Report Issue', icon: PlusCircle },
     { to: '/track', labelKey: 'trackComplaint', defaultLabel: 'Track Status', icon: Search },
-    { to: '/analytics', labelKey: 'analytics', defaultLabel: 'Hotspot Analytics', icon: BarChart3 },
+    { to: '/gis', labelKey: 'liveGisMap', defaultLabel: 'Live GIS Map', icon: Satellite },
+    { to: '/assistant', labelKey: 'voiceAiAssistant', defaultLabel: 'Voice & AI', icon: Bot },
+    { to: '/sos', labelKey: 'sosEmergency', defaultLabel: 'SOS Emergency', icon: Siren },
     { to: '/officer/dashboard', labelKey: 'officerPortal', defaultLabel: 'Officer Portal', icon: ShieldCheck },
   ];
 
@@ -60,21 +64,30 @@ export default function Navbar() {
             {navLinks.map((item) => {
               const active = isActive(item.to);
               const Icon = item.icon;
+              const isSos = item.to === '/sos';
               return (
                 <Link
                   key={item.to}
                   to={item.to}
                   className={`
-                    inline-flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all
+                    inline-flex items-center gap-1.5 px-2.5 py-2 rounded-lg text-xs font-semibold transition-all
                     ${
                       active
-                        ? 'bg-teal-50 text-teal-800 border border-teal-200/70 font-bold'
-                        : 'text-slate-600 hover:text-navy-900 hover:bg-slate-100/70 border border-transparent'
+                        ? isSos
+                          ? 'bg-rose-50 text-rose-800 border border-rose-200 font-bold'
+                          : 'bg-teal-50 text-teal-800 border border-teal-200/70 font-bold'
+                        : isSos
+                          ? 'text-rose-700 hover:bg-rose-50 border border-transparent'
+                          : 'text-slate-600 hover:text-navy-900 hover:bg-slate-100/70 border border-transparent'
                     }
                     focus-ring
                   `}
                 >
-                  <Icon className={`w-3.5 h-3.5 ${active ? 'text-teal-600' : 'text-slate-400'}`} />
+                  <Icon
+                    className={`w-3.5 h-3.5 ${
+                      isSos ? 'text-rose-600' : active ? 'text-teal-600' : 'text-slate-400'
+                    }`}
+                  />
                   <span>{t(item.labelKey, item.defaultLabel)}</span>
                 </Link>
               );
@@ -147,4 +160,3 @@ export default function Navbar() {
     </header>
   );
 }
-

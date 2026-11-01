@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react';
-import { useSearchParams, Link } from 'react-router-dom';
+import { useSearchParams, useParams, Link } from 'react-router-dom';
 import {
   Search,
   MapPin,
@@ -20,10 +20,12 @@ import StatusBadge from '../components/StatusBadge';
 import PriorityBadge from '../components/PriorityBadge';
 import AuditTimeline from '../components/AuditTimeline';
 import DuplicateAlert from '../components/DuplicateAlert';
+import CaseIdBadge from '../components/CaseIdBadge';
 import Spinner from '../components/Spinner';
 import ErrorState from '../components/ErrorState';
 import EmptyState from '../components/EmptyState';
-import { trackComplaint } from '../services/complaintService';
+import { trackComplaint, getRecentCases } from '../services/complaintService';
+import { connectLiveUpdates } from '../services/advancedService';
 import { formatDate } from '../utils/formatDate';
 import { useLanguage } from '../context/LanguageContext';
 
@@ -38,11 +40,13 @@ function getMediaUrl(url) {
 
 export default function TrackComplaint() {
   const [searchParams, setSearchParams] = useSearchParams();
+  const routeParams = useParams();
   const { t, language } = useLanguage();
 
-  const initialId = searchParams.get('id') || '';
+  const initialId = routeParams.trackingId || searchParams.get('id') || '';
   const [trackingInput, setTrackingInput] = useState(initialId);
   const [complaint, setComplaint] = useState(null);
+  const [recentCases, setRecentCases] = useState(() => getRecentCases());
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState(null);
   const [hasSearched, setHasSearched] = useState(false);
@@ -59,21 +63,40 @@ export default function TrackComplaint() {
     try {
       const data = await trackComplaint(cleanId);
       setComplaint(data);
+      setRecentCases(getRecentCases());
       setIsLoading(false);
     } catch (err) {
       setComplaint(null);
-      setError(err.userMessage || `Complaint tracking identifier '${cleanId}' not found in municipal records.`);
+      setError(err.userMessage || `Complaint Case ID '${cleanId}' not found in municipal records.`);
       setIsLoading(false);
     }
   };
 
-  // Auto-search if URL contains ?id=...
+  // Auto-search if URL contains /track/:trackingId or ?id=...
   useEffect(() => {
     if (initialId) {
       setTrackingInput(initialId);
       fetchTracking(initialId);
     }
   }, [initialId]);
+
+  // Real-time WebSocket subscription for live updates to the tracked Case ID
+  useEffect(() => {
+    if (!complaint) return undefined;
+    const activeCaseId = complaint.case_id || complaint.tracking_id;
+    const activeTrackId = complaint.tracking_id;
+
+    const disconnect = connectLiveUpdates((evt) => {
+      if (
+        evt.case_id === activeCaseId ||
+        evt.tracking_id === activeTrackId ||
+        evt.tracking_id === activeCaseId
+      ) {
+        fetchTracking(activeCaseId);
+      }
+    });
+    return disconnect;
+  }, [complaint]);
 
   const handleSearch = (e) => {
     e.preventDefault();
@@ -89,23 +112,27 @@ export default function TrackComplaint() {
       pageTitle={language === 'ta' ? 'புகார் நிலை அறிதல்' : 'Track Grievance Status'}
       subtitle={
         language === 'ta'
-          ? 'உங்கள் கண்காணிப்பு எண்ணை (Tracking ID) உள்ளிட்டு தற்போதைய நிலையை அறியவும்'
-          : 'Real-time status tracking and municipal field resolution audit trail.'
+          ? 'உங்கள் வழக்கு எண்ணை (Case ID: CP-2026-XXXXX) உள்ளிட்டு தற்போதைய நிலையை அறியவும்'
+          : 'Real-time Case ID status tracking and municipal field resolution audit trail.'
       }
       maxWidth="max-w-4xl"
     >
       <div className="space-y-8 pb-12">
         {/* Search Bar Container */}
-        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-card">
+        <div className="bg-white rounded-2xl border border-slate-200 p-6 shadow-card space-y-4">
           <form onSubmit={handleSearch} className="flex flex-col sm:flex-row items-start sm:items-end gap-3">
             <div className="flex-1 w-full">
               <Input
-                label="Municipal Tracking ID"
-                placeholder="e.g. CP-B7C97719 or CP-XXXXXXXX"
+                label={language === 'ta' ? 'நகராட்சி வழக்கு எண் (Case ID)' : 'Municipal Case ID / Tracking ID'}
+                placeholder="e.g. CP-2026-00093 or CP-6D07D491"
                 value={trackingInput}
                 onChange={(e) => setTrackingInput(e.target.value.toUpperCase())}
                 leftIcon={Search}
-                helperText="Enter the 8-character unique tracking identifier issued upon submission."
+                helperText={
+                  language === 'ta'
+                    ? 'வழக்கு எண் (எ.கா. CP-2026-00093) உள்ளிட்டு புகாரின் தற்போதைய நிலையை அறியவும்.'
+                    : 'Enter your unified Case ID (e.g. CP-2026-00093) issued upon complaint submission.'
+                }
                 required
               />
             </div>
@@ -120,6 +147,31 @@ export default function TrackComplaint() {
               {t('track', 'Track Issue')}
             </Button>
           </form>
+
+          {recentCases.length > 0 && (
+            <div className="pt-3 border-t border-slate-100 flex flex-wrap items-center gap-2">
+              <span className="text-[11px] font-bold text-slate-400 uppercase tracking-wider">
+                {language === 'ta' ? 'சமீபத்திய வழக்கு எண்கள்:' : 'Recent Case IDs:'}
+              </span>
+              {recentCases.slice(0, 5).map((rc) => {
+                const cid = rc.case_id || rc.tracking_id;
+                return (
+                  <button
+                    key={cid}
+                    type="button"
+                    onClick={() => {
+                      setTrackingInput(cid);
+                      setSearchParams({ id: cid });
+                      fetchTracking(cid);
+                    }}
+                    className="px-2.5 py-1 rounded-lg bg-slate-100 hover:bg-teal-50 text-navy-900 hover:text-teal-800 border border-slate-200 hover:border-teal-300 font-mono text-xs font-bold transition-colors"
+                  >
+                    {cid}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         {/* Loading State */}
@@ -127,7 +179,7 @@ export default function TrackComplaint() {
           <div className="p-12 text-center bg-white rounded-2xl border border-slate-200 shadow-card space-y-3">
             <Spinner size="lg" variant="teal" />
             <p className="text-xs text-slate-500 font-medium">
-              Querying municipal registry for tracking records...
+              Querying municipal registry for Case ID records...
             </p>
           </div>
         )}
@@ -135,7 +187,7 @@ export default function TrackComplaint() {
         {/* Error / Not Found State */}
         {!isLoading && error && (
           <ErrorState
-            title="Complaint Record Not Found"
+            title="Complaint Case ID Not Found"
             message={error}
             retryLabel="Search Again"
             onRetry={() => {
@@ -147,8 +199,8 @@ export default function TrackComplaint() {
         {/* Initial Empty State before any search */}
         {!isLoading && !hasSearched && !complaint && (
           <EmptyState
-            title="Enter Tracking Identifier"
-            description="Enter your complaint tracking number above to view department triage, assigned officers, and resolution photos."
+            title="Enter Case Identifier"
+            description="Enter your complaint Case ID (e.g. CP-2026-00093) above to view department triage, assigned officers, and resolution photos."
             icon={Search}
           />
         )}
@@ -156,28 +208,18 @@ export default function TrackComplaint() {
         {/* Successful Complaint Details Display */}
         {!isLoading && complaint && (
           <div className="bg-white rounded-2xl border border-slate-200/90 shadow-card p-6 sm:p-8 space-y-8 animate-in fade-in duration-200">
-            {/* Header: Tracking ID + Status & Priority */}
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-6 border-b border-slate-100">
-              <div className="space-y-1">
-                <span className="text-xs font-bold text-slate-400 uppercase tracking-widest font-mono">
-                  Complaint Tracking ID
-                </span>
-                <h2 className="text-2xl sm:text-3xl font-extrabold text-navy-950 font-mono tracking-tight">
-                  {complaint.tracking_id}
-                </h2>
-                <div className="flex items-center gap-3 text-xs text-slate-500">
-                  <span className="inline-flex items-center gap-1">
-                    <Calendar className="w-3.5 h-3.5 text-slate-400" />
-                    <span>Registered: {formatDate(complaint.created_at)}</span>
-                  </span>
-                </div>
-              </div>
-
-              <div className="flex items-center gap-2 self-start sm:self-center">
-                <PriorityBadge priority={complaint.priority} size="md" />
-                <StatusBadge status={complaint.status} size="md" />
-              </div>
-            </div>
+            {/* Unified Case ID Banner */}
+            <CaseIdBadge
+              variant="banner"
+              caseId={complaint.case_id || complaint.tracking_id}
+              trackingId={complaint.tracking_id}
+              status={complaint.status}
+              priority={complaint.priority}
+              createdAt={complaint.created_at}
+              showCopy={true}
+              showShare={true}
+              showTrackLink={false}
+            />
 
             {/* Duplicate Notice if applicable */}
             {complaint.duplicate_group_id && (
@@ -339,4 +381,3 @@ export default function TrackComplaint() {
     </MainLayout>
   );
 }
-
